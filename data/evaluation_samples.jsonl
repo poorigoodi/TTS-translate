@@ -1,0 +1,16 @@
+{"id": "fa_en_01", "direction": "fa-en", "source": "امروز هوا خیلی خوب است.", "reference": "The weather is very nice today.", "category": "everyday"}
+{"id": "fa_en_02", "direction": "fa-en", "source": "ساعت چند است؟", "reference": "What time is it?", "category": "question"}
+{"id": "fa_en_03", "direction": "fa-en", "source": "من دیروز با دوستم به کتابخانه رفتم و سه ساعت آنجا مطالعه کردم.", "reference": "Yesterday I went to the library with my friend and studied there for three hours.", "category": "long"}
+{"id": "fa_en_04", "direction": "fa-en", "source": "بابا، یه کم آروم‌تر حرف بزن!", "reference": "Dad, speak a little quieter!", "category": "informal"}
+{"id": "fa_en_05", "direction": "fa-en", "source": "قرار ملاقات ما ساعت ۱۴:۳۰ روز ۱۵ مارس ۲۰۲۴ است.", "reference": "Our appointment is at 14:30 on March 15, 2024.", "category": "numbers_dates"}
+{"id": "fa_en_06", "direction": "fa-en", "source": "علی رضایی در دانشگاه تهران درس می‌خواند.", "reference": "Ali Rezaei studies at the University of Tehran.", "category": "names"}
+{"id": "fa_en_07", "direction": "fa-en", "source": "لطفاً در را ببند؛ هوا سرد است!", "reference": "Please close the door; it is cold!", "category": "punctuation"}
+{"id": "fa_en_08", "direction": "fa-en", "source": "این کتاب خیلی جالب است.", "reference": "This book is very interesting.", "category": "ambiguity"}
+{"id": "en_fa_01", "direction": "en-fa", "source": "The weather is very nice today.", "reference": "امروز هوا خیلی خوب است.", "category": "everyday"}
+{"id": "en_fa_02", "direction": "en-fa", "source": "Where is the nearest subway station?", "reference": "نزدیک‌ترین ایستگاه مترو کجاست؟", "category": "question"}
+{"id": "en_fa_03", "direction": "en-fa", "source": "After finishing her homework, Sara walked to the park and called her brother.", "reference": "سارا بعد از تمام کردن تکالیفش به پارک رفت و با برادرش تماس گرفت.", "category": "long"}
+{"id": "en_fa_04", "direction": "en-fa", "source": "Hey, don't worry about it — we'll figure it out.", "reference": "هی، نگرانش نباش — درستش می‌کنیم.", "category": "informal"}
+{"id": "en_fa_05", "direction": "en-fa", "source": "The meeting starts at 9:15 AM on July 4, 2025.", "reference": "جلسه در ساعت ۹:۱۵ صبح روز ۴ ژوئیه ۲۰۲۵ شروع می‌شود.", "category": "numbers_dates"}
+{"id": "en_fa_06", "direction": "en-fa", "source": "Dr. Maryam Ahmadi works at Tehran University.", "reference": "دکتر مریم احمدی در دانشگاه تهران کار می‌کند.", "category": "names"}
+{"id": "en_fa_07", "direction": "en-fa", "source": "Wait — did you say \"yes\" or \"no\"?", "reference": "صبر کن — گفتی «بله» یا «نه»؟", "category": "punctuation"}
+{"id": "en_fa_08", "direction": "en-fa", "source": "She left the bank.", "reference": "او بانک را ترک کرد.", "category": "ambiguity"}

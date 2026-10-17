@@ -1,0 +1,83 @@
+/* Qwen Translator — minimal Persian / English layout helpers */
+
+:root {
+  --qt-bg: #f6f4ef;
+  --qt-panel: #ffffff;
+  --qt-ink: #1c1b19;
+  --qt-muted: #5c574f;
+  --qt-accent: #0f5c4c;
+  --qt-border: #ddd6c8;
+  --qt-radius: 10px;
+}
+
+.stApp {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(15, 92, 76, 0.08), transparent 42%),
+    radial-gradient(circle at 88% 0%, rgba(120, 90, 40, 0.07), transparent 38%),
+    var(--qt-bg);
+  color: var(--qt-ink);
+}
+
+.qt-hero {
+  padding: 0.4rem 0 1.2rem 0;
+  border-bottom: 1px solid var(--qt-border);
+  margin-bottom: 1.25rem;
+}
+
+.qt-hero h1 {
+  font-family: "Segoe UI", "Tahoma", "Noto Sans Arabic", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.15rem;
+}
+
+.qt-hero p {
+  color: var(--qt-muted);
+  margin: 0;
+}
+
+.qt-result {
+  background: var(--qt-panel);
+  border: 1px solid var(--qt-border);
+  border-radius: var(--qt-radius);
+  padding: 1rem 1.1rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.7;
+  font-size: 1.05rem;
+}
+
+.qt-result.rtl {
+  direction: rtl;
+  text-align: right;
+  font-family: "Tahoma", "Segoe UI", "Noto Nastaliq Urdu", "Noto Sans Arabic", sans-serif;
+}
+
+.qt-result.ltr {
+  direction: ltr;
+  text-align: left;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+.qt-label {
+  font-size: 0.85rem;
+  color: var(--qt-muted);
+  margin-bottom: 0.35rem;
+}
+
+textarea,
+.stTextArea textarea {
+  font-size: 1.02rem !important;
+  line-height: 1.65 !important;
+}
+
+.qt-rtl-input textarea {
+  direction: rtl;
+  text-align: right;
+  font-family: "Tahoma", "Segoe UI", "Noto Sans Arabic", sans-serif !important;
+}
+
+.qt-ltr-input textarea {
+  direction: ltr;
+  text-align: left;
+}

@@ -24,7 +24,6 @@ Primary workflow:
 | Configurable model ID for future fine-tuned checkpoints | Implemented |
 | Held-out evaluation script + SacreBLEU (optional) | Implemented |
 | Unit tests (no weight download) | Implemented |
-| Speech-to-Text / RAG / agents / databases | Out of scope |
 | Fine-tuning pipeline | Planned (not implemented) |
 
 ---

@@ -18,6 +18,7 @@ from config import (
     MAX_INPUT_LENGTH,
     MAX_NEW_TOKENS,
     TRANSLATION_MODEL_ID,
+    TRANSLATION_NO_REPEAT_NGRAM,
     TRANSLATION_REPETITION_PENALTY,
     TRANSLATION_TEMPERATURE,
     TRANSLATION_TOP_K,
@@ -127,15 +128,60 @@ def load_translation_model(model_id: str | None = None) -> tuple[Any, Any, str]:
     logger.info("Loading translation model %s on %s", target_id, device)
 
     try:
-        tokenizer = AutoTokenizer.from_pretrained(target_id, trust_remote_code=True)
+        from pathlib import Path
+
+        target_path = Path(target_id)
+        adapter_config = target_path / "adapter_config.json"
+        is_lora_adapter = target_path.exists() and adapter_config.exists()
+
         dtype = torch.float16 if device == "cuda" else torch.float32
-        model = AutoModelForCausalLM.from_pretrained(
-            target_id,
-            dtype=dtype,
-            trust_remote_code=True,
-        )
+
+        if is_lora_adapter:
+            # Fine-tuned LoRA checkpoint directory
+            try:
+                from peft import PeftModel
+            except ImportError as exc:
+                raise TranslationError(
+                    "This checkpoint is a LoRA adapter but `peft` is not installed. "
+                    "Run: pip install peft"
+                ) from exc
+
+            adapter_meta = {}
+            meta_file = target_path / "finetune_meta.json"
+            if meta_file.exists():
+                import json
+
+                adapter_meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            base_id = adapter_meta.get("base_model") or TRANSLATION_MODEL_ID
+            # Prefer base recorded in adapter_config if present
+            try:
+                import json
+
+                cfg = json.loads(adapter_config.read_text(encoding="utf-8"))
+                base_id = cfg.get("base_model_name_or_path") or base_id
+            except Exception:  # noqa: BLE001
+                pass
+
+            logger.info("Loading base %s + LoRA adapter %s", base_id, target_id)
+            tokenizer = AutoTokenizer.from_pretrained(target_id, trust_remote_code=True)
+            base = AutoModelForCausalLM.from_pretrained(
+                base_id,
+                dtype=dtype,
+                trust_remote_code=True,
+            )
+            model = PeftModel.from_pretrained(base, str(target_path))
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(target_id, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                target_id,
+                dtype=dtype,
+                trust_remote_code=True,
+            )
+
         model.to(device)
         model.eval()
+    except TranslationError:
+        raise
     except OSError as exc:
         raise TranslationError(
             f"Failed to load translation model '{target_id}'. "
@@ -182,6 +228,61 @@ def _strip_code_fences(text: str) -> str:
     return text
 
 
+def _tokens(text: str) -> list[str]:
+    """Split on whitespace; works for Persian and English."""
+    return re.findall(r"\S+", text)
+
+
+def _is_degenerate_repetition(text: str) -> bool:
+    """Detect runaway loops like 'چیزی چیزی چیزی…' that small LLMs sometimes emit."""
+    words = _tokens(text)
+    if len(words) < 6:
+        return False
+
+    # Consecutive identical tokens
+    streak = 1
+    for i in range(1, len(words)):
+        if words[i] == words[i - 1]:
+            streak += 1
+            if streak >= 4:
+                return True
+        else:
+            streak = 1
+
+    # One token dominates the output
+    from collections import Counter
+
+    counts = Counter(words)
+    _word, count = counts.most_common(1)[0]
+    if count >= 6 and count / len(words) >= 0.35:
+        return True
+
+    # Short phrase (2–4 tokens) repeated many times
+    for n in (2, 3, 4):
+        if len(words) < n * 4:
+            continue
+        phrase = " ".join(words[:n])
+        if phrase and text.count(phrase) >= 4:
+            return True
+
+    # Character-level loop (e.g. same 2–6 chars repeated)
+    compact = re.sub(r"\s+", "", text)
+    if len(compact) >= 24:
+        for n in range(2, 7):
+            unit = compact[:n]
+            if unit and compact.count(unit) >= 8 and len(unit) * compact.count(unit) >= 0.6 * len(compact):
+                return True
+
+    return False
+
+
+def _adaptive_max_new_tokens(source_text: str) -> int:
+    """Keep generations short for short inputs to reduce loop risk."""
+    # Rough char-based budget: translations rarely need > ~2x source length in tokens
+    budget = max(48, min(MAX_NEW_TOKENS, len(source_text) * 2 + 32))
+    return int(budget)
+
+
 def _postprocess_translation(raw: str, source_text: str) -> str:
     text = _strip_code_fences(raw).strip()
     if not text:
@@ -191,7 +292,6 @@ def _postprocess_translation(raw: str, source_text: str) -> str:
     lowered = text.lower()
     for marker in _PROMPT_MARKERS:
         if marker in lowered[:200]:
-            # Keep only content after the last colon/newline heuristic
             parts = re.split(r"(?:translated text|translation)\s*:\s*", text, flags=re.I)
             if len(parts) > 1:
                 text = parts[-1].strip()
@@ -204,7 +304,6 @@ def _postprocess_translation(raw: str, source_text: str) -> str:
             if len(lines) > 1:
                 lines = lines[1:]
             else:
-                # Single explanatory line — likely a failure
                 raise TranslationError(
                     "Model returned commentary instead of a translation. "
                     "Please try again or shorten the input."
@@ -215,21 +314,25 @@ def _postprocess_translation(raw: str, source_text: str) -> str:
     if not text:
         raise TranslationError("Translation was empty after cleaning.")
 
-    # Detect obvious echo of the source (same string)
     if text.strip() == source_text.strip() and len(source_text) > 20:
         raise TranslationError(
             "Model returned the source text unchanged. Translation may have failed."
         )
 
-    # Collapse pathological repetition of the same short phrase
-    if len(text) > 80:
-        words = text.split()
-        if len(words) >= 12:
-            chunk = " ".join(words[:4])
-            if text.count(chunk) >= 4:
-                raise TranslationError(
-                    "Model output appears highly repetitive. Please try again."
-                )
+    if _is_degenerate_repetition(text):
+        raise TranslationError(
+            "Model output collapsed into a repetitive loop (common on the base "
+            "Qwen3-0.6B for some Persian/English prompts). Please try again, "
+            "rephrase the input, or use a shorter sentence. "
+            "This is a known base-model limitation — fine-tuning later can help."
+        )
+
+    # Reject absurdly long outputs relative to the source
+    if len(text) > max(200, len(source_text) * 8):
+        raise TranslationError(
+            "Translation is unusually long compared to the input and was rejected. "
+            "Please try again."
+        )
 
     return text
 
@@ -281,18 +384,21 @@ def translate_text(
                 "Input truncated to MAX_INPUT_LENGTH=%s tokens.", MAX_INPUT_LENGTH
             )
 
+        max_new = _adaptive_max_new_tokens(source)
         generate_kwargs: dict[str, Any] = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
-            "max_new_tokens": MAX_NEW_TOKENS,
+            "max_new_tokens": max_new,
             "do_sample": True,
-            "temperature": TRANSLATION_TEMPERATURE,
+            "temperature": max(TRANSLATION_TEMPERATURE, 1e-5),
             "top_p": TRANSLATION_TOP_P,
             "top_k": TRANSLATION_TOP_K,
             "repetition_penalty": TRANSLATION_REPETITION_PENALTY,
             "pad_token_id": tokenizer.pad_token_id or tokenizer.eos_token_id,
             "eos_token_id": tokenizer.eos_token_id,
         }
+        if TRANSLATION_NO_REPEAT_NGRAM > 0:
+            generate_kwargs["no_repeat_ngram_size"] = TRANSLATION_NO_REPEAT_NGRAM
 
         generated = model.generate(**generate_kwargs)
         new_tokens = generated[0][input_ids.shape[-1] :].tolist()

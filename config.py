@@ -23,13 +23,16 @@ DEVICE = os.getenv("DEVICE", "auto")
 
 # Generation limits (conservative defaults for translation)
 MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", "1024"))
-MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "512"))
+MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "256"))
 
-# Non-thinking mode sampling (aligned with Qwen3 guidance, tuned conservatively for MT)
-TRANSLATION_TEMPERATURE = float(os.getenv("TRANSLATION_TEMPERATURE", "0.3"))
+# Non-thinking mode sampling — tuned to reduce runaway loops on small Qwen3
+TRANSLATION_TEMPERATURE = float(os.getenv("TRANSLATION_TEMPERATURE", "0.2"))
 TRANSLATION_TOP_P = float(os.getenv("TRANSLATION_TOP_P", "0.8"))
 TRANSLATION_TOP_K = int(os.getenv("TRANSLATION_TOP_K", "20"))
-TRANSLATION_REPETITION_PENALTY = float(os.getenv("TRANSLATION_REPETITION_PENALTY", "1.05"))
+TRANSLATION_REPETITION_PENALTY = float(os.getenv("TRANSLATION_REPETITION_PENALTY", "1.25"))
+TRANSLATION_NO_REPEAT_NGRAM = int(os.getenv("TRANSLATION_NO_REPEAT_NGRAM", "4"))
+# Hard cap for TTS input length (characters) to avoid noise on garbage text
+TTS_MAX_CHARS = int(os.getenv("TTS_MAX_CHARS", "400"))
 
 # OmniVoice TTS (official checkpoint: https://huggingface.co/k2-fsa/OmniVoice)
 OMNIVOICE_MODEL_ID = os.getenv("OMNIVOICE_MODEL_ID", "k2-fsa/OmniVoice")

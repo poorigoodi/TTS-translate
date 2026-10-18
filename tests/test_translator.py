@@ -58,6 +58,12 @@ def test_postprocess_rejects_echo_of_long_source():
         _postprocess_translation(source, source)
 
 
+def test_postprocess_rejects_persian_word_loop():
+    garbage = "سلام، نام " + ("چیزی " * 40)
+    with pytest.raises(TranslationError, match="repetitive"):
+        _postprocess_translation(garbage, "Hello, my name is Ali.")
+
+
 def test_translate_text_uses_non_thinking_template():
     """Ensure chat template is invoked with enable_thinking=False."""
     prompt_ids = torch.tensor([[10, 11, 12, 13]])

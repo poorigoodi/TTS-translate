@@ -26,5 +26,10 @@ omnivoice>=0.2.1
 # Evaluation (optional metric)
 sacrebleu>=2.4.0
 
+# Fine-tuning (LoRA)
+peft>=0.13.0
+# datasets package name conflicts conceptually with our /datasets folder;
+# the HF datasets library is optional — train script uses plain JSONL.
+
 # Tests
 pytest>=8.0.0

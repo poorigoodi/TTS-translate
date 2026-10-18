@@ -44,3 +44,9 @@ def test_generate_speech_rejects_empty(tmp_path):
 def test_generate_speech_rejects_bad_extension(tmp_path):
     with pytest.raises(TTSError, match="wav"):
         generate_speech("Hello", "en", tmp_path / "a.mp3")
+
+
+def test_generate_speech_rejects_repetitive_text(tmp_path):
+    garbage = "سلام " + ("چیزی " * 30)
+    with pytest.raises(TTSError, match="repetitive"):
+        generate_speech(garbage, "fa", tmp_path / "a.wav")

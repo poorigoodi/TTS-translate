@@ -54,6 +54,82 @@ def try_sacrebleu(hypotheses: list[str], references: list[str]) -> float | None:
     return float(result.score)
 
 
+def evaluate_samples(
+    samples: list[dict],
+    model_id: str,
+    *,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    """Run translation on samples and return ``(rows, summary)``.
+
+    Each row contains id, direction, category, status, seconds, source,
+    hypothesis, reference, and error. ``progress_callback(i, n, row)`` is
+    optional and called after each sample.
+    """
+    rows: list[dict] = []
+    hypotheses: list[str] = []
+    references: list[str] = []
+    times: list[float] = []
+    successes = 0
+    failures = 0
+    total = len(samples)
+
+    for index, item in enumerate(samples, start=1):
+        sample_id = item.get("id", f"sample_{index}")
+        direction_key = item["direction"]
+        source = item["source"]
+        reference = item.get("reference", "")
+        category = item.get("category", "")
+        src, tgt = parse_direction(direction_key)
+
+        started = time.perf_counter()
+        try:
+            hypothesis = translate_text(source, src, tgt, model_id=model_id)
+            elapsed = time.perf_counter() - started
+            status = "OK"
+            error = ""
+            successes += 1
+            hypotheses.append(hypothesis)
+            references.append(reference)
+        except TranslationError as exc:
+            elapsed = time.perf_counter() - started
+            hypothesis = ""
+            status = "FAIL"
+            error = str(exc)
+            failures += 1
+
+        times.append(elapsed)
+        row = {
+            "id": sample_id,
+            "direction": direction_key,
+            "category": category,
+            "status": status,
+            "seconds": round(elapsed, 2),
+            "source": source,
+            "hypothesis": hypothesis,
+            "reference": reference,
+            "error": error,
+        }
+        rows.append(row)
+        if progress_callback is not None:
+            progress_callback(index, total, row)
+
+    bleu = None
+    if hypotheses and references and all(references):
+        bleu = try_sacrebleu(hypotheses, references)
+
+    summary = {
+        "model_id": model_id,
+        "n": total,
+        "ok": successes,
+        "fail": failures,
+        "avg_seconds": round(statistics.mean(times), 2) if times else 0.0,
+        "sacrebleu": None if bleu is None else round(bleu, 2),
+        "note": "SacreBLEU does not fully measure semantic accuracy or translation quality.",
+    }
+    return rows, summary
+
+
 def run_evaluation(
     samples_path: Path,
     model_id: str,
@@ -73,65 +149,40 @@ def run_evaluation(
     print(f"Examples: {len(samples)}")
     print("-" * 60)
 
-    successes = 0
-    failures = 0
-    times: list[float] = []
-    hypotheses: list[str] = []
-    references: list[str] = []
-
-    for item in samples:
-        sample_id = item.get("id", "?")
-        direction_key = item["direction"]
-        source = item["source"]
-        reference = item.get("reference", "")
-        src, tgt = parse_direction(direction_key)
-
-        started = time.perf_counter()
-        try:
-            hypothesis = translate_text(source, src, tgt, model_id=model_id)
-            elapsed = time.perf_counter() - started
-            times.append(elapsed)
-            successes += 1
-            hypotheses.append(hypothesis)
-            references.append(reference)
-            print(f"[{sample_id}] OK ({elapsed:.2f}s)  {src}->{tgt}")
-            print(f"  source : {source}")
-            print(f"  output : {hypothesis}")
-            if reference:
-                print(f"  ref    : {reference}")
-        except TranslationError as exc:
-            elapsed = time.perf_counter() - started
-            times.append(elapsed)
-            failures += 1
-            print(f"[{sample_id}] FAIL ({elapsed:.2f}s)  {src}->{tgt}")
-            print(f"  source : {source}")
-            print(f"  error  : {exc}")
+    def _print_progress(_i: int, _n: int, row: dict) -> None:
+        src, tgt = parse_direction(row["direction"])
+        print(f"[{row['id']}] {row['status']} ({row['seconds']:.2f}s)  {src}->{tgt}")
+        print(f"  source : {row['source']}")
+        if row["status"] == "OK":
+            print(f"  output : {row['hypothesis']}")
+            if row["reference"]:
+                print(f"  ref    : {row['reference']}")
+        else:
+            print(f"  error  : {row['error']}")
         print()
 
-    avg_time = statistics.mean(times) if times else 0.0
-    print("=" * 60)
-    print(f"Successful generations : {successes}")
-    print(f"Failed generations     : {failures}")
-    print(f"Average inference time : {avg_time:.2f}s")
+    _rows, summary = evaluate_samples(samples, model_id, progress_callback=_print_progress)
 
-    if hypotheses and references and all(references):
-        bleu = try_sacrebleu(hypotheses, references)
-        if bleu is None:
+    print("=" * 60)
+    print(f"Successful generations : {summary['ok']}")
+    print(f"Failed generations     : {summary['fail']}")
+    print(f"Average inference time : {summary['avg_seconds']:.2f}s")
+
+    if summary["sacrebleu"] is None:
+        if summary["ok"] == 0:
+            print("SacreBLEU: skipped (no successful outputs).")
+        else:
             print(
-                "SacreBLEU: not available (install with `pip install sacrebleu`). "
+                "SacreBLEU: not available or missing references "
+                "(install with `pip install sacrebleu` if needed). "
                 "Note: automatic metrics do not fully measure semantic accuracy."
             )
-        else:
-            print(f"SacreBLEU corpus score : {bleu:.2f}")
-            print(
-                "Note: automatic metrics do not fully measure semantic accuracy "
-                "or translation quality."
-            )
     else:
-        print("SacreBLEU: skipped (missing references or no successful outputs).")
+        print(f"SacreBLEU corpus score : {summary['sacrebleu']:.2f}")
+        print(summary["note"])
 
     unload_translation_model()
-    return 0 if failures == 0 else 2
+    return 0 if summary["fail"] == 0 else 2
 
 
 def build_parser() -> argparse.ArgumentParser:

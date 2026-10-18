@@ -28,6 +28,7 @@ from config import (
     OMNIVOICE_SAMPLE_RATE,
     OMNIVOICE_SPEED,
     OMNIVOICE_VOICE_INSTRUCT,
+    TTS_MAX_CHARS,
     TTS_SUPPORTED_LANGUAGES,
     ensure_output_dir,
     resolve_device,
@@ -48,12 +49,41 @@ def is_tts_language_supported(language: str) -> bool:
     return (language or "").strip().lower() in TTS_SUPPORTED_LANGUAGES
 
 
+def _looks_repetitive(text: str) -> bool:
+    words = text.split()
+    if len(words) >= 6:
+        streak = 1
+        for i in range(1, len(words)):
+            if words[i] == words[i - 1]:
+                streak += 1
+                if streak >= 4:
+                    return True
+            else:
+                streak = 1
+        from collections import Counter
+
+        _w, count = Counter(words).most_common(1)[0]
+        if count >= 6 and count / len(words) >= 0.35:
+            return True
+    return False
+
+
 def _validate_text(text: str) -> str:
     if text is None:
         raise TTSError("Text for speech generation is required.")
     cleaned = text.strip()
     if not cleaned:
         raise TTSError("Text for speech generation cannot be empty.")
+    if len(cleaned) > TTS_MAX_CHARS:
+        raise TTSError(
+            f"Text is too long for TTS ({len(cleaned)} chars; max {TTS_MAX_CHARS}). "
+            "Refuse to speak failed/looping translations."
+        )
+    if _looks_repetitive(cleaned):
+        raise TTSError(
+            "Text looks like a repetitive loop. "
+            "Translate again before using Speak — TTS cannot read this cleanly."
+        )
     return cleaned
 
 

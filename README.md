@@ -17,7 +17,7 @@ Primary workflow:
 | Feature | Status |
 | --- | --- |
 | Persian ↔ English translation (manual language selection) | Implemented |
-| Streamlit UI with RTL/LTR text direction | Implemented |
+| Desktop tkinter UI (dual-pane translate + speak) | Implemented |
 | Language swap (preserves input) | Implemented |
 | OmniVoice TTS from **translated** text | Implemented |
 | WAV playback + download | Implemented |
@@ -32,7 +32,7 @@ Primary workflow:
 
 ```mermaid
 flowchart LR
-  UI[Streamlit app.py] --> TR[translator.py]
+  UI[tkinter app.py] --> TR[translator.py]
   UI --> TTS[tts_engine.py]
   TR --> Qwen[Qwen3-0.6B / fine-tuned checkpoint]
   TTS --> OV[OmniVoice k2-fsa/OmniVoice]
@@ -134,16 +134,17 @@ export HF_ENDPOINT=https://hf-mirror.com
 ## How to run
 
 ```bash
-streamlit run app.py
+python app.py
 ```
 
-### Kaggle notebook
+### Kaggle notebooks
 
-For GPU evaluation on Kaggle (without the Streamlit UI), upload and run:
+| Notebook | Purpose |
+| --- | --- |
+| `notebooks/kaggle_qwen_translation_eval.ipynb` | Evaluate base or LoRA model |
+| `notebooks/kaggle_qwen_lora_finetune.ipynb` | Prepare TSV + LoRA fine-tune + download adapter |
 
-`notebooks/kaggle_qwen_translation_eval.ipynb`
-
-Enable **GPU + Internet**, then run cells top-to-bottom. Results are saved under `/kaggle/working/outputs`.
+Enable **GPU + Internet**. For fine-tune, add the EN–FA `.tsv` as a Kaggle dataset input. Adapter is written to `/kaggle/working/qwen3-fa-en-lora`.
 
 Open the local URL shown in the terminal (typically `http://localhost:8501`).
 
@@ -175,6 +176,8 @@ No UI or TTS code changes are required if the checkpoint is Transformers-compati
 
 Held-out samples live in `data/evaluation_samples.jsonl` (not used for training).
 
+### CLI evaluation
+
 ```bash
 # Both directions
 python evaluate_translation.py
@@ -200,7 +203,7 @@ Unit tests do **not** download model weights:
 pytest -q
 ```
 
-Model integration tests are intentionally excluded from the default suite. End-to-end GPU/CPU inference must be verified manually with `streamlit run app.py` and/or `evaluate_translation.py`.
+Model integration tests are intentionally excluded from the default suite. End-to-end GPU/CPU inference must be verified manually with `python app.py` and/or `evaluate_translation.py`.
 
 ---
 
@@ -238,17 +241,33 @@ OmniVoice (`k2-fsa/OmniVoice`) successfully wrote WAV files for both English and
 
 ---
 
-## Future fine-tuning plan
+## Fine-tuning (LoRA)
 
-When base-model weaknesses are documented (see above):
+A Tatoeba-style EN–FA TSV lives under `datasets/`. Prepare splits and train:
 
-1. Collect a high-quality Persian–English parallel dataset (domains matching intended use).
-2. Train/validation/held-out test splits — **never** train on the test set.
-3. Supervised fine-tuning of Qwen3-0.6B; consider LoRA/QLoRA **after** checking VRAM and dependency compatibility.
-4. Evaluate before vs after with the same `evaluate_translation.py` samples plus human review.
-5. Point `TRANSLATION_MODEL_ID` at the new checkpoint.
+```bash
+pip install peft
+python training/prepare_sft_data.py
+python training/train_lora.py --epochs 2 --batch-size 2 --grad-accum 8
+```
 
-Do not assume a small dataset will automatically improve quality.
+This writes a LoRA adapter to `checkpoints/qwen3-fa-en-lora/`.
+
+Use it in the app (PowerShell):
+
+```powershell
+$env:TRANSLATION_MODEL_ID="checkpoints\qwen3-fa-en-lora"
+python app.py
+```
+
+Or put the same value in `.env`.
+
+Notes:
+- Splits are train / val / **held-out test** — do not train on `data/sft/test.jsonl`.
+- App evaluation samples in `data/evaluation_samples.jsonl` are excluded from training.
+- LoRA on Qwen3-0.6B typically fits in ~8 GB VRAM (fp16).
+- Re-run `python evaluate_translation.py` before vs after to measure change.
+- A small dataset helps some patterns but does not guarantee professional MT quality.
 
 ---
 

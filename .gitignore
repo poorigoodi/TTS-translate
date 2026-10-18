@@ -32,6 +32,7 @@ htmlcov/
 *.gguf
 models/
 checkpoints/
+data/sft/
 .cache/
 huggingface/
 *.wasm

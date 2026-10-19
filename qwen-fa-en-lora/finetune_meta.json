@@ -1,0 +1,10 @@
+{
+  "base_model": "Qwen/Qwen3-0.6B",
+  "adapter_dir": "/kaggle/working/qwen3-fa-en-lora",
+  "train_examples": 15248,
+  "val_examples": 846,
+  "epochs": 2,
+  "lora_r": 16,
+  "lora_alpha": 32,
+  "how_to_use_local": "Set TRANSLATION_MODEL_ID to this folder, then python app.py"
+}

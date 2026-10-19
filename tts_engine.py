@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import soundfile as sf
 import torch
 
@@ -168,6 +169,61 @@ def _cleanup_old_audio(directory: Path) -> None:
             logger.warning("Could not delete old audio file %s: %s", old, exc)
 
 
+def _estimate_min_duration(text: str, language: str) -> float | None:
+    """Return a minimum duration for short clips, else None (use speed).
+
+    OmniVoice often emits static/noise for very short utterances without a
+    reference voice (see upstream issue #118). A small floor stabilizes that.
+    """
+    chars_per_sec = 12.0 if language == "en" else 8.0
+    estimated = max(len(text) / chars_per_sec, 1.5)
+    if estimated < 3.5:
+        return max(3.5, estimated * 1.25)
+    return None
+
+
+def _to_numpy_waveform(audio: Any) -> np.ndarray:
+    """Normalize OmniVoice output to a 1-D float32 waveform in [-1, 1]."""
+    waveform = audio[0] if isinstance(audio, (list, tuple)) else audio
+    if hasattr(waveform, "detach"):
+        waveform = waveform.detach().cpu().numpy()
+    arr = np.asarray(waveform, dtype=np.float32).reshape(-1)
+    if arr.size == 0:
+        raise TTSError("OmniVoice returned an empty waveform.")
+    peak = float(np.max(np.abs(arr)))
+    if peak > 1.0:
+        arr = arr / peak
+    return arr
+
+
+def _looks_like_noise(waveform: np.ndarray, sample_rate: int) -> bool:
+    """Heuristic: real speech concentrates energy in ~300–3400 Hz."""
+    x = np.asarray(waveform, dtype=np.float64).reshape(-1)
+    if x.size < int(sample_rate * 0.25):
+        return True
+    n = min(x.size, sample_rate * 5)
+    chunk = x[:n] - x[:n].mean()
+    spectrum = np.abs(np.fft.rfft(chunk)) ** 2
+    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+
+    def band_energy(lo: float, hi: float) -> float:
+        mask = (freqs >= lo) & (freqs < hi)
+        return float(spectrum[mask].sum())
+
+    total = band_energy(20.0, 12000.0) + 1e-12
+    speech = band_energy(300.0, 3400.0) / total
+    high = band_energy(3400.0, 12000.0) / total
+    return speech < 0.25 or high > 0.65
+
+
+def _run_generate(model: Any, **kwargs: Any) -> np.ndarray:
+    with torch.inference_mode():
+        audio = model.generate(**kwargs)
+    if audio is None:
+        raise TTSError("OmniVoice returned no audio.")
+    return _to_numpy_waveform(audio)
+
+
 def generate_speech(
     text: str,
     language: str,
@@ -181,7 +237,9 @@ def generate_speech(
     Returns the absolute path of the written WAV file.
 
     Uses OmniVoice Auto Voice when ``use_voice_design`` is False, otherwise
-    passes the configured voice-design instruct string (no reference audio).
+    passes the configured voice-design instruct string for English only.
+    Voice design is trained mainly on Chinese/English; applying it to Persian
+    frequently produces static instead of speech.
     """
     source = _validate_text(text)
     lang = _validate_language(language)
@@ -199,24 +257,56 @@ def generate_speech(
     except Exception as exc:  # noqa: BLE001
         raise TTSError(f"Unexpected error loading OmniVoice: {exc}") from exc
 
+    sample_rate = int(getattr(model, "sampling_rate", None) or OMNIVOICE_SAMPLE_RATE)
+    min_duration = _estimate_min_duration(source, lang)
+
+    # Official API param is ``language`` (code or name), not ``language_id``.
     generate_kwargs: dict[str, Any] = {
         "text": source,
+        "language": lang,
         "num_step": OMNIVOICE_NUM_STEP,
         "speed": OMNIVOICE_SPEED,
+        "denoise": True,
     }
-    # Optional language hint when the installed API accepts it
-    generate_kwargs["language_id"] = lang
-    if use_voice_design and OMNIVOICE_VOICE_INSTRUCT.strip():
+    if min_duration is not None:
+        generate_kwargs["duration"] = min_duration
+        generate_kwargs.pop("speed", None)
+
+    # Voice design is stable for English; skip for Persian (Auto Voice).
+    apply_instruct = (
+        use_voice_design
+        and lang == "en"
+        and bool(OMNIVOICE_VOICE_INSTRUCT.strip())
+    )
+    if apply_instruct:
         generate_kwargs["instruct"] = OMNIVOICE_VOICE_INSTRUCT.strip()
 
     try:
-        with torch.inference_mode():
-            try:
-                audio = model.generate(**generate_kwargs)
-            except TypeError:
-                # Older / stricter signatures may not accept language_id
-                generate_kwargs.pop("language_id", None)
-                audio = model.generate(**generate_kwargs)
+        waveform = _run_generate(model, **generate_kwargs)
+        if _looks_like_noise(waveform, sample_rate):
+            logger.warning(
+                "OmniVoice output looked like noise; retrying with Auto Voice."
+            )
+            retry_kwargs = {
+                k: v
+                for k, v in generate_kwargs.items()
+                if k != "instruct"
+            }
+            # Nudge duration upward on retry for short/unstable clips.
+            retry_kwargs["duration"] = max(
+                float(retry_kwargs.get("duration") or 0.0),
+                min_duration or 4.0,
+                4.0,
+            )
+            retry_kwargs.pop("speed", None)
+            waveform = _run_generate(model, **retry_kwargs)
+            if _looks_like_noise(waveform, sample_rate):
+                raise TTSError(
+                    "OmniVoice produced noise instead of speech. "
+                    "Try a longer sentence, or translate again and Speak."
+                )
+    except TTSError:
+        raise
     except torch.cuda.OutOfMemoryError as exc:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -227,12 +317,8 @@ def generate_speech(
     except Exception as exc:  # noqa: BLE001
         raise TTSError(f"OmniVoice generation failed: {exc}") from exc
 
-    if audio is None:
-        raise TTSError("OmniVoice returned no audio.")
-
-    waveform = audio[0] if isinstance(audio, (list, tuple)) else audio
     try:
-        sf.write(str(path), waveform, OMNIVOICE_SAMPLE_RATE)
+        sf.write(str(path), waveform, sample_rate, subtype="PCM_16")
     except OSError as exc:
         raise TTSError(f"Failed to write WAV file to {path}: {exc}") from exc
 

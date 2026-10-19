@@ -17,6 +17,7 @@ from config import (
     ensure_output_dir,
     resolve_device,
 )
+from translation_log import TranslationLogError, append_translation
 from translator import load_translation_model, translate_text
 from tts_engine import generate_speech, is_tts_language_supported, load_tts_model
 
@@ -48,7 +49,6 @@ class TranslatorApp(tk.Tk):
         style.configure(
             "Sub.TLabel", font=("Segoe UI", 10), foreground="#666666", background="#ffffff"
         )
-        style.configure("Big.TButton", font=("Segoe UI", 11, "bold"), padding=(28, 10))
         style.configure("Tool.TButton", font=("Segoe UI", 9), padding=(8, 4))
         style.configure("Root.TFrame", background="#ffffff")
 
@@ -100,7 +100,7 @@ class TranslatorApp(tk.Tk):
         self.tgt_combo.grid(row=0, column=2, sticky="ew", padx=(8, 0))
         self.tgt_combo.bind("<<ComboboxSelected>>", self._on_lang_change)
 
-        # Tool rows under language selectors (always visible strip)
+        # Tool rows above text panes
         tools = ttk.Frame(root, style="Root.TFrame")
         tools.grid(row=2, column=0, sticky="ew", pady=(0, 4))
         tools.columnconfigure(0, weight=1)
@@ -109,21 +109,17 @@ class TranslatorApp(tk.Tk):
         left_tools = ttk.Frame(tools, style="Root.TFrame")
         left_tools.grid(row=0, column=0, sticky="w")
         ttk.Button(
-            left_tools, text="Copy", style="Tool.TButton", command=lambda: self._copy("source")
+            left_tools, text="Paste", style="Tool.TButton", command=self._paste_source
         ).pack(side="left")
+        ttk.Button(
+            left_tools, text="Copy", style="Tool.TButton", command=lambda: self._copy("source")
+        ).pack(side="left", padx=(8, 0))
 
         right_tools = ttk.Frame(tools, style="Root.TFrame")
         right_tools.grid(row=0, column=1, sticky="e")
-        self.translate_btn = ttk.Button(
-            right_tools,
-            text="Translate",
-            style="Tool.TButton",
-            command=self._start_translate,
-        )
-        self.translate_btn.pack(side="left")
         ttk.Button(
             right_tools, text="Copy", style="Tool.TButton", command=lambda: self._copy("target")
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left")
         self.speak_btn = ttk.Button(
             right_tools,
             text="Speak",
@@ -148,9 +144,15 @@ class TranslatorApp(tk.Tk):
             highlightthickness=0,
             padx=10,
             pady=10,
+            undo=True,
         )
         self.source_box.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         self.source_box.insert("1.0", "This is a test sentence.")
+        # Explicit paste bindings (Ctrl+V / Shift+Insert)
+        self.source_box.bind("<<Paste>>", self._on_paste_event)
+        self.source_box.bind("<Control-v>", self._on_paste_event)
+        self.source_box.bind("<Control-V>", self._on_paste_event)
+        self.source_box.bind("<Shift-Insert>", self._on_paste_event)
 
         self.target_box = tk.Text(
             panes,
@@ -165,9 +167,26 @@ class TranslatorApp(tk.Tk):
         self.target_box.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         self.target_box.configure(state="disabled")
 
-        # Bottom status / progress (Translate lives in the tool row above the panes)
+        # Blue Translate button centered under the boxes
         bottom = ttk.Frame(root, style="Root.TFrame")
         bottom.grid(row=4, column=0, sticky="ew")
+
+        self.translate_btn = tk.Button(
+            bottom,
+            text="Translate",
+            command=self._start_translate,
+            font=("Segoe UI", 11, "bold"),
+            bg="#2563eb",
+            fg="#ffffff",
+            activebackground="#1d4ed8",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=36,
+            pady=8,
+            cursor="hand2",
+            bd=0,
+        )
+        self.translate_btn.pack(pady=(4, 10))
 
         self.progress = ttk.Progressbar(bottom, mode="indeterminate")
         self.progress.pack(fill="x")
@@ -238,10 +257,43 @@ class TranslatorApp(tk.Tk):
         self.speak_btn.configure(state=state)
         if busy:
             self.progress.start(12)
+            self.translate_btn.configure(bg="#93c5fd")
         else:
             self.progress.stop()
+            self.translate_btn.configure(bg="#2563eb")
         if message:
             self._set_status(message)
+
+    def _clipboard_text(self) -> str:
+        try:
+            return self.clipboard_get()
+        except tk.TclError:
+            return ""
+
+    def _paste_source(self) -> None:
+        """Paste clipboard into the source box (replaces current content)."""
+        clip = self._clipboard_text()
+        if not clip.strip():
+            messagebox.showinfo("Paste", "Clipboard is empty.")
+            return
+        self.source_box.delete("1.0", "end")
+        self.source_box.insert("1.0", clip)
+        self.source_box.focus_set()
+        self._set_status("Pasted from clipboard.")
+
+    def _on_paste_event(self, event=None):
+        """Handle Ctrl+V / Shift+Insert into the source box."""
+        clip = self._clipboard_text()
+        if not clip:
+            return "break"
+        try:
+            # Replace selection if any, otherwise insert at cursor
+            self.source_box.delete("sel.first", "sel.last")
+        except tk.TclError:
+            pass
+        self.source_box.insert("insert", clip)
+        self._set_status("Pasted.")
+        return "break"
 
     def _copy(self, which: str) -> None:
         text = self._read(which)
@@ -250,6 +302,7 @@ class TranslatorApp(tk.Tk):
             return
         self.clipboard_clear()
         self.clipboard_append(text)
+        self.update_idletasks()
         self._set_status("Copied.")
 
     # ---- translate ----
@@ -271,15 +324,31 @@ class TranslatorApp(tk.Tk):
             try:
                 load_translation_model(TRANSLATION_MODEL_ID)
                 out = translate_text(text, src, tgt)
-                self.after(0, self._on_translate_ok, out)
+                log_path = None
+                log_error = None
+                try:
+                    log_path = append_translation(text, out, src, tgt)
+                except TranslationLogError as exc:
+                    log_error = str(exc)
+                self.after(0, self._on_translate_ok, out, log_path, log_error)
             except Exception as exc:  # noqa: BLE001
                 self.after(0, self._on_error, "Translation error", exc)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_translate_ok(self, result: str) -> None:
+    def _on_translate_ok(
+        self,
+        result: str,
+        log_path: str | None = None,
+        log_error: str | None = None,
+    ) -> None:
         self._set_target(result)
-        self._set_busy(False, "Done. Press Speak to hear the translation.")
+        if log_error:
+            self._set_busy(False, f"Done · Excel log failed: {log_error}")
+        elif log_path:
+            self._set_busy(False, f"Done · logged to {log_path}")
+        else:
+            self._set_busy(False, "Done. Press Speak to hear the translation.")
 
     def _on_error(self, title: str, exc: Exception) -> None:
         self._set_busy(False, f"{title} failed.")

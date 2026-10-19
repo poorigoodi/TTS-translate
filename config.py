@@ -39,7 +39,8 @@ OMNIVOICE_MODEL_ID = os.getenv("OMNIVOICE_MODEL_ID", "k2-fsa/OmniVoice")
 OMNIVOICE_SAMPLE_RATE = 24000
 OMNIVOICE_NUM_STEP = int(os.getenv("OMNIVOICE_NUM_STEP", "32"))
 OMNIVOICE_SPEED = float(os.getenv("OMNIVOICE_SPEED", "1.0"))
-# Voice design instruct (stable for English; may generalize to Persian)
+# Voice design instruct — applied for English only (OmniVoice voice-design
+# training is Chinese/English; using it for Persian often yields static).
 OMNIVOICE_VOICE_INSTRUCT = os.getenv(
     "OMNIVOICE_VOICE_INSTRUCT",
     "female, young adult, moderate pitch",
@@ -58,6 +59,11 @@ TTS_SUPPORTED_LANGUAGES = frozenset({"fa", "en"})
 
 # Keep a bounded number of generated WAV files in outputs/
 MAX_CACHED_AUDIO_FILES = int(os.getenv("MAX_CACHED_AUDIO_FILES", "20"))
+
+# Append-only Excel log of each translate run (input + output)
+TRANSLATION_LOG_PATH = Path(
+    os.getenv("TRANSLATION_LOG_PATH", str(OUTPUT_DIR / "translation_log.xlsx"))
+)
 
 
 def resolve_device() -> str:

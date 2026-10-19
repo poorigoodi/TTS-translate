@@ -24,9 +24,13 @@ def test_is_tts_language_supported():
 
 def test_generate_speech_creates_parent_dirs(tmp_path):
     out = tmp_path / "nested" / "audio" / "sample.wav"
-    fake_audio = [np.zeros(2400, dtype=np.float32)]
+    # Speech-band tone so the noise heuristic accepts the mock output.
+    sr = 24000
+    t = np.arange(sr, dtype=np.float32) / sr
+    fake_audio = [0.2 * np.sin(2 * np.pi * 800 * t).astype(np.float32)]
     fake_model = MagicMock()
     fake_model.generate.return_value = fake_audio
+    fake_model.sampling_rate = sr
 
     with patch("tts_engine.load_tts_model", return_value=fake_model):
         path = generate_speech("Hello world.", "en", out)
@@ -34,6 +38,25 @@ def test_generate_speech_creates_parent_dirs(tmp_path):
     assert Path(path).exists()
     assert Path(path).suffix == ".wav"
     assert out.parent.exists()
+    assert fake_model.generate.call_args.kwargs.get("language") == "en"
+    assert "language_id" not in fake_model.generate.call_args.kwargs
+
+
+def test_generate_speech_persian_skips_voice_design(tmp_path):
+    out = tmp_path / "fa.wav"
+    sr = 24000
+    t = np.arange(sr, dtype=np.float32) / sr
+    fake_audio = [0.2 * np.sin(2 * np.pi * 800 * t).astype(np.float32)]
+    fake_model = MagicMock()
+    fake_model.generate.return_value = fake_audio
+    fake_model.sampling_rate = sr
+
+    with patch("tts_engine.load_tts_model", return_value=fake_model):
+        generate_speech("سلام دنیا، امروز هوا خوب است.", "fa", out)
+
+    kwargs = fake_model.generate.call_args.kwargs
+    assert kwargs.get("language") == "fa"
+    assert "instruct" not in kwargs
 
 
 def test_generate_speech_rejects_empty(tmp_path):

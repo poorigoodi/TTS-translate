@@ -142,9 +142,9 @@ python app.py
 | Notebook | Purpose |
 | --- | --- |
 | `notebooks/kaggle_qwen_translation_eval.ipynb` | Evaluate base or LoRA model |
-| `notebooks/kaggle_qwen_lora_finetune.ipynb` | Prepare TSV + LoRA fine-tune + download adapter |
+| `notebooks/kaggle_qwen_lora_finetune.ipynb` | Prepare parquet + LoRA fine-tune + download adapter |
 
-Enable **GPU + Internet**. For fine-tune, add the EN–FA `.tsv` as a Kaggle dataset input. Adapter is written to `/kaggle/working/qwen3-fa-en-lora`.
+Enable **GPU + Internet**. For fine-tune, add `datasets/translation_pairs_merged.parquet` as a Kaggle dataset input. Adapter is written to `/kaggle/working/qwen3-fa-en-lora`.
 
 Open the local URL shown in the terminal (typically `http://localhost:8501`).
 
@@ -243,11 +243,11 @@ OmniVoice (`k2-fsa/OmniVoice`) successfully wrote WAV files for both English and
 
 ## Fine-tuning (LoRA)
 
-A Tatoeba-style EN–FA TSV lives under `datasets/`. Prepare splits and train:
+EN–FA pairs live under `datasets/translation_pairs_merged.parquet`. Prepare splits and train:
 
 ```bash
-pip install peft
-python training/prepare_sft_data.py
+pip install peft pyarrow pandas
+python training/prepare_sft_data.py --max-pairs 300000
 python training/train_lora.py --epochs 2 --batch-size 2 --grad-accum 8
 ```
 
